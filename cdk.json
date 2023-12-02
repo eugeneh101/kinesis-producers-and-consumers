@@ -1,0 +1,21 @@
+{
+    "app": "python3 app.py",
+    "context": {
+        "environment": {
+            "AWS_REGION": "us-east-1",
+            "VPC": "vpc-for-ecs",
+            "AVAILABILITY_ZONES": ["b", "c"],
+            "IAM_ROLE_NAME": "ecs-task-role",
+            "ECS_CLUSTER_NAME": "kinesis-cluster",
+            "ECS_SERVICE_NAME_TEMPLATE": "kinesis-{}-service",
+            "ECS_TASK_DEFINITION_NAME_TEMPLATE": "kinesis-{}-definition",
+            "ECS_TASK_REPO_NAME_TEMPLATE": "kinesis-{}-repo",
+            "ECS_ACTIVATE_SERVICES": false,
+            "ECS_ENABLE_EXEC": true,
+            "STREAM_CHECKPOINTER": "stream-checkpointer",
+            "SOURCE_STREAM": "source-stream",
+            "VERTEX_STREAMS": ["vertex-stream-a", "vertex-stream-b", "vertex-stream-c"],
+            "SINK_STREAM": "sink-stream"
+        }
+    }
+}
