@@ -12,6 +12,8 @@
             "ECS_TASK_REPO_NAME_TEMPLATE": "kinesis-{}-repo",
             "ECS_ACTIVATE_SERVICES": false,
             "ECS_ENABLE_EXEC": true,
+            "MAX_BATCH_SIZE": 100,
+            "ENABLE_PRINT": true,
             "STREAM_CHECKPOINTER": "stream-checkpointer",
             "SOURCE_STREAM": "source-stream",
             "VERTEX_STREAMS": ["vertex-stream-a", "vertex-stream-b", "vertex-stream-c"],

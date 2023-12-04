@@ -7,8 +7,8 @@ import pytz
 
 
 STREAM_CHECKPOINTER = os.environ["STREAM_CHECKPOINTER"]
-SOURCE_STREAM = os.environ["SOURCE_STREAM"]
-VERTEX_STREAM = os.environ["VERTEX_STREAM"]
+VERTEX_STREAMS = json.loads(os.environ["VERTEX_STREAMS"])
+SINK_STREAM = os.environ["SINK_STREAM"]
 FREQUENCY_PER_MINUTE = json.loads(os.environ["FREQUENCY_PER_MINUTE"])
 MAX_BATCH_SIZE = json.loads(os.environ["MAX_BATCH_SIZE"])
 ENABLE_PRINT = json.loads(os.environ["ENABLE_PRINT"])
@@ -56,13 +56,13 @@ def get_shard_iterator(
     return response["ShardIterator"]
 
 
-def get_and_put_kinesis_records(
+def get_and_reduce_and_put_kinesis_records(
     shard_iter: str,
     source_stream: str,
     target_stream: str,
     max_batch_size: int,
     enable_print: bool,
-) -> str:
+) -> tuple[str, bool]:
     response = kinesis_client.get_records(
         ShardIterator=shard_iter, Limit=max_batch_size
     )
@@ -70,22 +70,27 @@ def get_and_put_kinesis_records(
     records = response["Records"]
     exists_backpressure = max_batch_size == len(records)
 
-    relevant_records = []
+    accumulated_value = 0
     for record in records:
-        stream = json.loads(record["Data"].decode("utf-8"))["stream"]
-        if stream == target_stream:
-            relevant_records.append(
-                {
-                    "Data": record["Data"],
-                    "PartitionKey": "doesn't matter if only 1 shard",  # hard coded
-                }
-            )
-    if relevant_records:
+        data = json.loads(record["Data"].decode("utf-8"))
+        stream = data["stream"]
+        assert stream == source_stream, f'Expected "{source_stream} but got "{stream}"'
+        accumulated_value += data["value"]
+    if records:
+        reduced_record = {
+            "stream": source_stream,
+            "summed_value": accumulated_value,
+            "count": len(records),
+        }
         response = kinesis_client.put_records(
             StreamName=target_stream,
-            Records=relevant_records,
+            Records=[
+                {
+                    "Data": json.dumps(reduced_record).encode("utf-8"),
+                    "PartitionKey": "doesn't matter if only 1 shard",  # hard coded
+                }
+            ],
         )
-        assert response["ResponseMetadata"]["HTTPStatusCode"] == 200
         approximate_arrival_timestamp = (
             record["ApproximateArrivalTimestamp"]
             .astimezone(pytz.utc)
@@ -101,37 +106,47 @@ def get_and_put_kinesis_records(
         )
         if enable_print:
             print(
-                f'Put {len(response["Records"])} record(s) in "{target_stream}" '
+                f'Reduced {len(records)} records from "{source_stream}", '
+                f'put {len(response["Records"])} record(s) in "{target_stream}", '
                 "and checkpointed"
             )
     return next_shard_iter, exists_backpressure
 
 
 if __name__ == "__main__":
-    shard_iter = get_shard_iterator(
-        source_stream=SOURCE_STREAM,
-        target_stream=VERTEX_STREAM,
-        enable_print=ENABLE_PRINT,
-    )
-    while True:
-        shard_iter, exists_backpressure = get_and_put_kinesis_records(
-            shard_iter=shard_iter,
-            source_stream=SOURCE_STREAM,
-            target_stream=VERTEX_STREAM,
-            max_batch_size=MAX_BATCH_SIZE,
+    stream_iterators = {}
+    for vertex_stream in VERTEX_STREAMS:
+        stream_iterators[vertex_stream] = get_shard_iterator(
+            source_stream=vertex_stream,
+            target_stream=SINK_STREAM,
             enable_print=ENABLE_PRINT,
         )
-        while exists_backpressure:
-            if ENABLE_PRINT:
-                print(
-                    f'There exists backpressure for "{SOURCE_STREAM}" to '
-                    f'"{VERTEX_STREAM}". Catching up!'
-                )
-            shard_iter, exists_backpressure = get_and_put_kinesis_records(
-                shard_iter=shard_iter,
-                source_stream=SOURCE_STREAM,
-                target_stream=VERTEX_STREAM,
+    while True:
+        for vertex_stream in VERTEX_STREAMS:
+            (
+                stream_iterators[vertex_stream],
+                exists_backpressure,
+            ) = get_and_reduce_and_put_kinesis_records(
+                shard_iter=stream_iterators[vertex_stream],
+                source_stream=vertex_stream,
+                target_stream=SINK_STREAM,
                 max_batch_size=MAX_BATCH_SIZE,
                 enable_print=ENABLE_PRINT,
             )
+            while exists_backpressure:
+                if ENABLE_PRINT:
+                    print(
+                        f'There exists backpressure for "{vertex_stream}" to '
+                        f'"{SINK_STREAM}". Catching up!'
+                    )
+                (
+                    stream_iterators[vertex_stream],
+                    exists_backpressure,
+                ) = get_and_reduce_and_put_kinesis_records(
+                    shard_iter=stream_iterators[vertex_stream],
+                    source_stream=vertex_stream,
+                    target_stream=SINK_STREAM,
+                    max_batch_size=MAX_BATCH_SIZE,
+                    enable_print=ENABLE_PRINT,
+                )
         time.sleep(60 / FREQUENCY_PER_MINUTE)

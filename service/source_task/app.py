@@ -8,7 +8,8 @@ import numpy as np
 
 SOURCE_STREAM = os.environ["SOURCE_STREAM"]
 VERTEX_STREAMS = json.loads(os.environ["VERTEX_STREAMS"])
-FREQUENCY_PER_MINUTE = float(os.environ["FREQUENCY_PER_MINUTE"])
+FREQUENCY_PER_MINUTE = json.loads(os.environ["FREQUENCY_PER_MINUTE"])
+ENABLE_PRINT = json.loads(os.environ["ENABLE_PRINT"])
 AWS_REGION = os.environ["AWS_REGION"]
 
 kinesis_client = boto3.client("kinesis", region_name=AWS_REGION)
@@ -18,6 +19,7 @@ def put_kinesis_records(
     stream_name: str,
     vertex_streams: list[str],
     frequency_per_minute: int,
+    enable_print: bool,
 ) -> None:
     records = []
     for i, vertex_stream in enumerate(vertex_streams, 1):
@@ -37,15 +39,16 @@ def put_kinesis_records(
     )
     assert response["ResponseMetadata"]["HTTPStatusCode"] == 200
     assert response["FailedRecordCount"] == 0
-    print(f'Published {len(records)} records to "{stream_name}"')  ### delete
+    if enable_print:
+        print(f'Published {len(response["Records"])} record(s) to "{stream_name}"')
 
 
 if __name__ == "__main__":
-    print("Initializing")  ### delete
     while True:
         put_kinesis_records(
             stream_name=SOURCE_STREAM,
             vertex_streams=VERTEX_STREAMS,
             frequency_per_minute=FREQUENCY_PER_MINUTE,
+            enable_print=ENABLE_PRINT,
         )
         time.sleep(60 / FREQUENCY_PER_MINUTE)

@@ -105,9 +105,7 @@ class KinesisProducersAndConsumersStack(Stack):
         self.role = iam.Role(
             self,
             "EcsTaskExecutionRole",
-            role_name=environment["IAM_ROLE_NAME"]
-            + "-"
-            + environment["AWS_REGION"],  ### change later
+            role_name=environment["IAM_ROLE_NAME"] + "-" + environment["AWS_REGION"],
             assumed_by=iam.ServicePrincipal("ecs-tasks.amazonaws.com"),
             managed_policies=[
                 iam.ManagedPolicy.from_aws_managed_policy_name(
@@ -128,16 +126,16 @@ class KinesisProducersAndConsumersStack(Stack):
                 )
             )
 
-        self.dynamodb_table = dynamodb.Table(  ### make this strongly consistent reads
+        self.dynamodb_table = dynamodb.Table(
             self,
             "KinesisCheckpointTable",
             table_name=environment["STREAM_CHECKPOINTER"],
             partition_key=dynamodb.Attribute(
-                name="stream_name",  # hard coded
+                name="source_stream",  # hard coded
                 type=dynamodb.AttributeType.STRING,
             ),
             sort_key=dynamodb.Attribute(
-                name="filter_name",  # hard coded
+                name="target_stream",  # hard coded
                 type=dynamodb.AttributeType.STRING,
             ),
             removal_policy=RemovalPolicy.DESTROY,
@@ -186,27 +184,21 @@ class KinesisProducersAndConsumersStack(Stack):
         self.source_task_repo = ecr.Repository(
             self,
             "SourceTaskRepo",
-            repository_name=environment["ECS_TASK_REPO_NAME_TEMPLATE"].format(
-                "source"
-            ),  # hard coded
+            repository_name=environment["ECS_TASK_REPO_NAME_TEMPLATE"].format("source"),
             auto_delete_images=True,
             removal_policy=RemovalPolicy.DESTROY,
         )
         self.vertex_task_repo = ecr.Repository(
             self,
             "VertexTaskRepo",
-            repository_name=environment["ECS_TASK_REPO_NAME_TEMPLATE"].format(
-                "vertex"
-            ),  # hard coded
+            repository_name=environment["ECS_TASK_REPO_NAME_TEMPLATE"].format("vertex"),
             auto_delete_images=True,
             removal_policy=RemovalPolicy.DESTROY,
         )
         self.sink_task_repo = ecr.Repository(
             self,
             "SinkTaskRepo",
-            repository_name=environment["ECS_TASK_REPO_NAME_TEMPLATE"].format(
-                "sink"
-            ),  # hard coded
+            repository_name=environment["ECS_TASK_REPO_NAME_TEMPLATE"].format("sink"),
             auto_delete_images=True,
             removal_policy=RemovalPolicy.DESTROY,
         )
@@ -222,9 +214,7 @@ class KinesisProducersAndConsumersStack(Stack):
             stack=self,
             task_definition_name=environment[
                 "ECS_TASK_DEFINITION_NAME_TEMPLATE"
-            ].format(
-                "source"
-            ),  # hard coded
+            ].format("source"),
             task_directory="service/source_task",  # hard coded
             ecr_repo=self.source_task_repo,
             role=self.role,
@@ -232,6 +222,7 @@ class KinesisProducersAndConsumersStack(Stack):
                 "SOURCE_STREAM": environment["SOURCE_STREAM"],
                 "VERTEX_STREAMS": json.dumps(environment["VERTEX_STREAMS"]),
                 "FREQUENCY_PER_MINUTE": json.dumps(60),  # hard coded
+                "ENABLE_PRINT": json.dumps(environment["ENABLE_PRINT"]),
                 "AWS_REGION": environment["AWS_REGION"],
             },
         )
@@ -241,9 +232,7 @@ class KinesisProducersAndConsumersStack(Stack):
                 stack=self,
                 task_definition_name=environment[
                     "ECS_TASK_DEFINITION_NAME_TEMPLATE"
-                ].format(
-                    vertex_stream
-                ),  # hard coded
+                ].format(vertex_stream),
                 task_directory="service/vertex_task",  # hard coded
                 ecr_repo=self.vertex_task_repo,
                 role=self.role,
@@ -251,11 +240,31 @@ class KinesisProducersAndConsumersStack(Stack):
                     "STREAM_CHECKPOINTER": environment["STREAM_CHECKPOINTER"],
                     "SOURCE_STREAM": environment["SOURCE_STREAM"],
                     "VERTEX_STREAM": vertex_stream,
-                    "FREQUENCY_PER_MINUTE": json.dumps(60),  # hard coded
+                    "FREQUENCY_PER_MINUTE": json.dumps(30),  # hard coded
+                    "MAX_BATCH_SIZE": json.dumps(environment["MAX_BATCH_SIZE"]),
+                    "ENABLE_PRINT": json.dumps(environment["ENABLE_PRINT"]),
                     "AWS_REGION": environment["AWS_REGION"],
                 },
             )
             self.vertex_task_definitions[vertex_stream] = vertex_task_definition
+        self.sink_task_definition = ecs_task_definition(
+            stack=self,
+            task_definition_name=environment[
+                "ECS_TASK_DEFINITION_NAME_TEMPLATE"
+            ].format("sink"),
+            task_directory="service/sink_task",  # hard coded
+            ecr_repo=self.sink_task_repo,
+            role=self.role,
+            env_vars={
+                "STREAM_CHECKPOINTER": environment["STREAM_CHECKPOINTER"],
+                "VERTEX_STREAMS": json.dumps(environment["VERTEX_STREAMS"]),
+                "SINK_STREAM": environment["SINK_STREAM"],
+                "FREQUENCY_PER_MINUTE": json.dumps(len(environment["VERTEX_STREAMS"])),
+                "MAX_BATCH_SIZE": json.dumps(environment["MAX_BATCH_SIZE"]),
+                "ENABLE_PRINT": json.dumps(environment["ENABLE_PRINT"]),
+                "AWS_REGION": environment["AWS_REGION"],
+            },
+        )
 
         # if ECS fails to deploy successfully, the Cloudformation stack gets stuck for up to 3 hours
         if environment["ECS_ACTIVATE_SERVICES"]:
@@ -288,3 +297,15 @@ class KinesisProducersAndConsumersStack(Stack):
                     # security_groups=[],
                 )
                 self.vertex_services[vertex_stream] = vertex_service
+            self.sink_service = ecs.FargateService(
+                self,
+                "SinkService",
+                service_name=environment["ECS_SERVICE_NAME_TEMPLATE"].format("sink"),
+                cluster=self.ecs_cluster,
+                task_definition=self.sink_task_definition,
+                desired_count=1,
+                vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PUBLIC),
+                assign_public_ip=True,  # seems to need to be True if using Public subnet
+                enable_execute_command=environment["ECS_ENABLE_EXEC"],
+                # security_groups=[],
+            )
