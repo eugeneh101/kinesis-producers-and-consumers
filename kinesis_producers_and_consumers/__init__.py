@@ -240,7 +240,7 @@ class KinesisProducersAndConsumersStack(Stack):
                     "STREAM_CHECKPOINTER": environment["STREAM_CHECKPOINTER"],
                     "SOURCE_STREAM": environment["SOURCE_STREAM"],
                     "VERTEX_STREAM": vertex_stream,
-                    "FREQUENCY_PER_MINUTE": json.dumps(30),  # hard coded
+                    "FREQUENCY_PER_MINUTE": json.dumps(60),  # hard coded
                     "MAX_BATCH_SIZE": json.dumps(environment["MAX_BATCH_SIZE"]),
                     "ENABLE_PRINT": json.dumps(environment["ENABLE_PRINT"]),
                     "AWS_REGION": environment["AWS_REGION"],

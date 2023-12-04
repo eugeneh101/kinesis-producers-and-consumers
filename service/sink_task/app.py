@@ -70,17 +70,20 @@ def get_and_reduce_and_put_kinesis_records(
     records = response["Records"]
     exists_backpressure = max_batch_size == len(records)
 
-    accumulated_value = 0
+    summed_value = 0
+    summed_write_read_latency = 0
     for record in records:
         data = json.loads(record["Data"].decode("utf-8"))
         stream = data["stream"]
         assert stream == source_stream, f'Expected "{source_stream} but got "{stream}"'
-        accumulated_value += data["value"]
+        summed_value += data["value"]
+        summed_write_read_latency += data["write_read_latency"]
     if records:
         reduced_record = {
             "stream": source_stream,
-            "summed_value": accumulated_value,
+            "summed_value": summed_value,
             "count": len(records),
+            "average_write_read_latency": summed_write_read_latency / len(records),
         }
         response = kinesis_client.put_records(
             StreamName=target_stream,
@@ -149,4 +152,4 @@ if __name__ == "__main__":
                     max_batch_size=MAX_BATCH_SIZE,
                     enable_print=ENABLE_PRINT,
                 )
-        time.sleep(60 / FREQUENCY_PER_MINUTE)
+            time.sleep(60 / FREQUENCY_PER_MINUTE)

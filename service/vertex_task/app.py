@@ -1,6 +1,7 @@
 import json
 import os
 import time
+from datetime import datetime
 
 import boto3
 import pytz
@@ -70,13 +71,16 @@ def get_and_put_kinesis_records(
     records = response["Records"]
     exists_backpressure = max_batch_size == len(records)
 
+    now = datetime.utcnow()
     relevant_records = []
     for record in records:
-        stream = json.loads(record["Data"].decode("utf-8"))["stream"]
-        if stream == target_stream:
+        data = json.loads(record["Data"].decode("utf-8"))
+        if data["stream"] == target_stream:
+            write_time = datetime.strptime(data["write_time"], "%Y-%m-%dT%H:%M:%S.%f")
+            data["write_read_latency"] = (now - write_time).total_seconds()
             relevant_records.append(
                 {
-                    "Data": record["Data"],
+                    "Data": json.dumps(data).encode("utf-8"),
                     "PartitionKey": "doesn't matter if only 1 shard",  # hard coded
                 }
             )

@@ -10,7 +10,7 @@
             "ECS_SERVICE_NAME_TEMPLATE": "kinesis-{}-service",
             "ECS_TASK_DEFINITION_NAME_TEMPLATE": "kinesis-{}-definition",
             "ECS_TASK_REPO_NAME_TEMPLATE": "kinesis-{}-repo",
-            "ECS_ACTIVATE_SERVICES": false,
+            "ECS_ACTIVATE_SERVICES": true,
             "ECS_ENABLE_EXEC": true,
             "MAX_BATCH_SIZE": 100,
             "ENABLE_PRINT": true,

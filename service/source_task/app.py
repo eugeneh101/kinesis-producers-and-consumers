@@ -1,6 +1,7 @@
 import json
 import os
 import time
+from datetime import datetime
 
 import boto3
 import numpy as np
@@ -21,6 +22,7 @@ def put_kinesis_records(
     frequency_per_minute: int,
     enable_print: bool,
 ) -> None:
+    now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.%f")
     records = []
     for i, vertex_stream in enumerate(vertex_streams, 1):
         record = {
@@ -28,6 +30,7 @@ def put_kinesis_records(
                 {
                     "stream": vertex_stream,
                     "value": np.random.poisson(lam=i * 100 / frequency_per_minute),
+                    "write_time": now,
                 }
             ).encode("utf-8"),
             "PartitionKey": "doesn't matter if only 1 shard",  # hard coded
