@@ -1,4 +1,5 @@
 aws-cdk-lib==2.96.2
-boto3
+boto3==1.33.8
 constructs>=10.0.0,<11.0.0
 cdk-ecr-deployment==2.5.30
+pydantic==2.5.2

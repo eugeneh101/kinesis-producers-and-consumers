@@ -1,5 +1,4 @@
-from abc import ABC, abstractmethod
-from datetime import datetime
+from abc import abstractmethod
 import json
 from typing import Generic, Optional, TypeVar
 
@@ -7,6 +6,7 @@ from .source import Source
 
 T = TypeVar("T")
 U = TypeVar("U")
+
 
 class Vertex(Source[T], Generic[T, U]):
     def __init__(
@@ -19,6 +19,7 @@ class Vertex(Source[T], Generic[T, U]):
         self.source_stream = source_stream
         self.max_batch_size = max_batch_size
 
+    @abstractmethod
     async def handle_record(self, record) -> Optional[T]:
         """takes a record from the consumed stream and returns an Optional output record"""
         # NOTE: if it returns None the record will not be published downstream
@@ -92,7 +93,7 @@ class Vertex(Source[T], Generic[T, U]):
             )
             if enable_print:
                 print(
-                    f'Put {len(response["Records"])} record(s) in "{target_stream}" '
+                    f'Put {len(response["Records"])} record(s) in "{self.target_stream}" '
                     "and checkpointed"
                 )
         return next_shard_iter, exists_backpressure

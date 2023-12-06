@@ -14,6 +14,18 @@ def deploy_or_update_worker(worker):
     requests.post("https://upload.xyz/new_worker", content=pickled_worker)
 
 
+def get_status(worker_name):
+    has_permission = True
+    assert has_permission
+    # websocket stream of logs
+
+
+def check_status(worker_name):
+    has_permission = True
+    assert has_permission
+    # returns json of basic status info
+
+
 @dataclass
 class Record:
     """This would be defined by the stream they are consuming from"""

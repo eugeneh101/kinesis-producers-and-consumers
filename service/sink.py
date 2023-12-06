@@ -1,5 +1,8 @@
 from abc import abstractmethod
-from typing import Generic, TypeVar
+from enum import Enum, auto
+from typing import Any, Generic, TypeVar
+
+from pydantic import BaseModel
 
 from .vertex import Vertex
 
@@ -7,13 +10,7 @@ T = TypeVar("T")
 
 
 class Sink(Vertex[T, None], Generic[T]):
-    async def get_storage(self):
-        # TODO: implement a basic storage retrieval
-        ...
 
-    async def update_storage(self, new_storage):
-        # TODO: implement a basic storage update
-        ...
 
     @abstractmethod
     async def _handle_records(self, response: list[T]):
