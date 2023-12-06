@@ -1,9 +1,7 @@
 from abc import ABC, abstractmethod
 from datetime import datetime
 import json
-from typing import Generic, TypeVar
-
-import boto3
+from typing import Generic, Optional, TypeVar
 
 from .source import Source
 
@@ -29,8 +27,10 @@ class Vertex(Source[T], Generic[T, U]):
         self,
         enable_print: bool = True,
     ) -> str:
+        """Which shard are you in, and where is your latest checkpoint in that shard"""
+
         # TODO: clean this up
-        record = dynamodb_table.get_item(
+        record = self.dynamodb_table.get_item(
             Key={  # hard coded keys
                 "source_stream": self.source_stream,
                 "target_stream": self.target_stream,
@@ -65,11 +65,11 @@ class Vertex(Source[T], Generic[T, U]):
     async def run(self, shard_iter: str, enable_print: bool = True):
         response = self.kinesis_client.get_records(
             ShardIterator=shard_iter,
-            Limit=max_batch_size,
+            Limit=self.max_batch_size,
         )
         next_shard_iter = response["NextShardIterator"]
         records = response["Records"]
-        exists_backpressure = max_batch_size == len(records)
+        exists_backpressure = self.max_batch_size == len(records)
 
         relevant_records = []
         for record in records:
@@ -79,14 +79,14 @@ class Vertex(Source[T], Generic[T, U]):
                 relevant_records.append(result)
         if relevant_records:
             response = self.kinesis_client.put_records(
-                StreamName=target_stream,
+                StreamName=self.target_stream,
                 Records=relevant_records,
             )
             assert response["ResponseMetadata"]["HTTPStatusCode"] == 200
-            dynamodb_table.put_item(
+            self.dynamodb_table.put_item(
                 Item={
-                    "source_stream": source_stream,
-                    "target_stream": target_stream,
+                    "source_stream": self.source_stream,
+                    "target_stream": self.target_stream,
                     "SequenceNumber": record["SequenceNumber"],
                 }
             )
