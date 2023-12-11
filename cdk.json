@@ -3,21 +3,27 @@
     "context": {
         "environment": {
             "AWS_REGION": "us-east-1",
+            "IAM_ROLE_NAME": "ecs-task-role",
+
+            "SOURCE_STREAM": "source-stream",
+            "VERTEX_STREAMS": ["vertex-stream-a", "vertex-stream-b", "vertex-stream-c"],
+            "SINK_STREAM": "sink-stream",
+
+            "MAX_BATCH_SIZE": 1000,
+            "ENABLE_PRINT": true,
+
             "VPC": "vpc-for-ecs",
             "AVAILABILITY_ZONES": ["b", "c"],
-            "IAM_ROLE_NAME": "ecs-task-role",
             "ECS_CLUSTER_NAME": "kinesis-cluster",
             "ECS_SERVICE_NAME_TEMPLATE": "kinesis-{}-service",
             "ECS_TASK_DEFINITION_NAME_TEMPLATE": "kinesis-{}-definition",
             "ECS_TASK_REPO_NAME_TEMPLATE": "kinesis-{}-repo",
             "ECS_ACTIVATE_SERVICES": true,
             "ECS_ENABLE_EXEC": true,
-            "MAX_BATCH_SIZE": 100,
-            "ENABLE_PRINT": true,
             "STREAM_CHECKPOINTER": "stream-checkpointer",
-            "SOURCE_STREAM": "source-stream",
-            "VERTEX_STREAMS": ["vertex-stream-a", "vertex-stream-b", "vertex-stream-c"],
-            "SINK_STREAM": "sink-stream"
+
+            "CONNECT_LAMBDAS_TO_KINESIS": true,
+            "LAMBDA_NAME_TEMPLATE": "publisher-to-{}-lambda"
         }
     }
 }

@@ -12,6 +12,7 @@ from aws_cdk import (
     aws_ecr_assets as ecr_assets,
     aws_iam as iam,
     aws_kinesis as kinesis,
+    aws_lambda as _lambda,
     aws_logs as logs,
 )
 from constructs import Construct
@@ -29,7 +30,7 @@ def ecs_task_definition(
     task_asset = ecr_assets.DockerImageAsset(
         stack, f"EcrImage{task_definition_name}", directory=task_directory
     )  # uploads to `container-assets` ECR repo
-    ecr_deploy.ECRDeployment(  # upload to desired ECR repo
+    deploy_repo = ecr_deploy.ECRDeployment(  # upload to desired ECR repo
         stack,
         f"PushTaskImage{task_definition_name}",
         src=ecr_deploy.DockerImageName(task_asset.image_uri),
@@ -70,6 +71,10 @@ def ecs_task_definition(
         environment=env_vars,
     )
     # container.add_port_mappings(ecs.PortMapping(container_port=80))
+
+    # make sure repo created before task definition
+    task_definition.node.add_dependency(deploy_repo)
+
     return task_definition
 
 
@@ -104,13 +109,19 @@ class KinesisProducersAndConsumersStack(Stack):
 
         self.role = iam.Role(
             self,
-            "EcsTaskExecutionRole",
+            "EcsTaskExecutionAndLambdaRole",
             role_name=environment["IAM_ROLE_NAME"] + "-" + environment["AWS_REGION"],
-            assumed_by=iam.ServicePrincipal("ecs-tasks.amazonaws.com"),
+            assumed_by=iam.CompositePrincipal(
+                iam.ServicePrincipal("ecs-tasks.amazonaws.com"),
+                iam.ServicePrincipal("lambda.amazonaws.com"),
+            ),
             managed_policies=[
                 iam.ManagedPolicy.from_aws_managed_policy_name(
                     "service-role/AmazonECSTaskExecutionRolePolicy"
-                ),  ### later principle of least privileges
+                ),  ### principle of least privileges later
+                iam.ManagedPolicy.from_aws_managed_policy_name(
+                    "service-role/AWSLambdaBasicExecutionRole"  # write Cloudwatch logs
+                ),
             ],
         )
         if environment["ECS_ENABLE_EXEC"]:
@@ -122,7 +133,7 @@ class KinesisProducersAndConsumersStack(Stack):
                         "ssmmessages:OpenControlChannel",
                         "ssmmessages:CreateControlChannel",
                     ],
-                    resources=["*"],
+                    resources=["*"],  ### principle of least privileges later
                 )
             )
 
@@ -202,6 +213,84 @@ class KinesisProducersAndConsumersStack(Stack):
             auto_delete_images=True,
             removal_policy=RemovalPolicy.DESTROY,
         )
+
+        self.vertex_lambdas = {}
+        for vertex_stream in environment["VERTEX_STREAMS"]:
+            vertex_lambda = _lambda.Function(
+                self,
+                f"Lambda{vertex_stream}",
+                function_name=environment["LAMBDA_NAME_TEMPLATE"].format(vertex_stream),
+                handler="handler.lambda_handler",
+                memory_size=128,
+                timeout=Duration.seconds(3),  # should be very fast
+                runtime=_lambda.Runtime.PYTHON_3_9,
+                environment={
+                    "VERTEX_STREAM": vertex_stream,
+                    "ENABLE_PRINT": json.dumps(environment["ENABLE_PRINT"]),
+                    "AWSREGION": environment[
+                        "AWS_REGION"
+                    ],  # AWS doesn't allow "AWS_REGION" as environment variable
+                },
+                code=_lambda.Code.from_asset(
+                    "lambda_code/vertex_lambda",
+                    exclude=[".venv/*"],
+                ),
+                role=self.role,
+                # retry_attempts=0,
+                # vpc=self.vpc,
+                # vpc_subnets=...,
+                # security_groups=...,
+                # log_retention=logs.RetentionDays.ONE_WEEK,
+                # log_retention_role=role,
+            )
+            self.vertex_lambdas[vertex_stream] = vertex_lambda
+            log_group = logs.LogGroup(
+                self,
+                f"LogGroup{vertex_stream}",
+                log_group_name="/aws/lambda/{}".format(
+                    environment["LAMBDA_NAME_TEMPLATE"].format(vertex_stream)
+                ),
+                retention=logs.RetentionDays.ONE_WEEK,  # hard coded
+                removal_policy=RemovalPolicy.DESTROY,
+            )
+            # make sure log group created before Lambda, so Lambda does not create
+            # log group by itself
+            vertex_lambda.node.add_dependency(log_group)
+        self.sink_lambda = _lambda.Function(
+            self,
+            f"LambdaSinkStream",
+            function_name=environment["LAMBDA_NAME_TEMPLATE"].format(
+                environment["SINK_STREAM"]
+            ),
+            handler="handler.lambda_handler",
+            memory_size=128,
+            timeout=Duration.seconds(3),  # should be very fast
+            runtime=_lambda.Runtime.PYTHON_3_9,
+            environment={
+                "SINK_STREAM": environment["SINK_STREAM"],
+                "ENABLE_PRINT": json.dumps(environment["ENABLE_PRINT"]),
+                "AWSREGION": environment[
+                    "AWS_REGION"
+                ],  # AWS doesn't allow "AWS_REGION" as environment variable
+            },
+            code=_lambda.Code.from_asset(
+                "lambda_code/sink_lambda",
+                exclude=[".venv/*"],
+            ),
+            role=self.role,
+        )
+        log_group = logs.LogGroup(
+            self,
+            f"LogGroupSinkStream",
+            log_group_name="/aws/lambda/{}".format(
+                environment["LAMBDA_NAME_TEMPLATE"].format(environment["SINK_STREAM"])
+            ),
+            retention=logs.RetentionDays.ONE_WEEK,  # hard coded
+            removal_policy=RemovalPolicy.DESTROY,
+        )
+        # make sure log group created before Lambda, so Lambda does not create
+        # log group by itself
+        self.sink_lambda.node.add_dependency(log_group)
 
         # connecting AWS resources together
         self.dynamodb_table.grant_read_write_data(grantee=self.role)
@@ -309,3 +398,85 @@ class KinesisProducersAndConsumersStack(Stack):
                 enable_execute_command=environment["ECS_ENABLE_EXEC"],
                 # security_groups=[],
             )
+
+        if environment["CONNECT_LAMBDAS_TO_KINESIS"]:
+            self.kinesis_efos = {}
+            self.lambda_event_source_mappings = {}
+            for vertex_stream in environment["VERTEX_STREAMS"]:
+                vertex_lambda = self.vertex_lambdas[vertex_stream]
+                vertex_lambda.role.add_to_policy(
+                    iam.PolicyStatement(
+                        actions=[
+                            "kinesis:ListStreams",
+                            "kinesis:PutRecord",
+                            "kinesis:SubscribeToShard",
+                            "kinesis:DescribeStreamSummary",
+                            "kinesis:ListShards",
+                            "kinesis:PutRecords",
+                            "kinesis:GetShardIterator",
+                            "kinesis:GetRecords",
+                            "kinesis:DescribeStream",
+                        ],
+                        resources=["*"],  ### principle of least privileges later
+                    )
+                )
+                kinesis_efo = kinesis.CfnStreamConsumer(
+                    self,
+                    f"EfoFromSourceTo{vertex_stream}Lambda",
+                    consumer_name=f"efo-from-source-stream-to-{vertex_stream}-lambda",
+                    stream_arn=self.source_stream.stream_arn,
+                )
+                self.kinesis_efos[
+                    (environment["SOURCE_STREAM"], vertex_stream)
+                ] = kinesis_efo  # source-target
+                lambda_event_source_mapping = _lambda.EventSourceMapping(
+                    self,
+                    f"LambdaEventSourceMappingFor{vertex_stream}",
+                    target=vertex_lambda,
+                    batch_size=environment["MAX_BATCH_SIZE"],
+                    event_source_arn=kinesis_efo.attr_consumer_arn,
+                    # filters=None,
+                    max_batching_window=Duration.seconds(0),  # instantaneous
+                    starting_position=_lambda.StartingPosition.LATEST,
+                    # on_failure=None,
+                    # parallelization_factor=None,
+                    # retry_attempts=None,
+                )
+                self.lambda_event_source_mappings[
+                    (environment["SOURCE_STREAM"], vertex_stream)
+                ] = lambda_event_source_mapping  # source-target
+
+                vertex_stream_instance = self.vertex_streams[vertex_stream]
+                kinesis_efo = kinesis.CfnStreamConsumer(
+                    self,
+                    f"EfoFrom{vertex_stream}ToSinkStreamLambda",
+                    consumer_name=f"efo-from-{vertex_stream}-to-sink-lambda",
+                    stream_arn=vertex_stream_instance.stream_arn,
+                )
+                self.kinesis_efos[
+                    (vertex_stream, environment["SINK_STREAM"])
+                ] = kinesis_efo  # source-target
+                lambda_event_source_mapping = _lambda.EventSourceMapping(
+                    self,
+                    f"LambdaEventSourceMappingForSinkStreamFrom{vertex_stream}",
+                    target=self.sink_lambda,
+                    batch_size=environment["MAX_BATCH_SIZE"],
+                    event_source_arn=kinesis_efo.attr_consumer_arn,
+                    # filters=None,
+                    max_batching_window=Duration.seconds(60),  # gather once per minute
+                    # tumbling_window is better than max_batching_window, but needs special return key
+                    # tumbling_window=Duration.seconds(60),
+                    starting_position=_lambda.StartingPosition.LATEST,
+                    # on_failure=None,
+                    # parallelization_factor=None,
+                    # retry_attempts=None,
+                )
+                self.lambda_event_source_mappings[
+                    (vertex_stream, environment["SINK_STREAM"])
+                ] = lambda_event_source_mapping  # source-target
+            if environment["ECS_ACTIVATE_SERVICES"]:
+                # make sure Lambda attached to EFO before ECS service publish into Kinesis
+                for (
+                    lambda_event_source_mapping
+                ) in self.lambda_event_source_mappings.values():
+                    self.source_service.node.add_dependency(lambda_event_source_mapping)

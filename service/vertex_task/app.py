@@ -78,6 +78,7 @@ def get_and_put_kinesis_records(
         if data["stream"] == target_stream:
             write_time = datetime.strptime(data["write_time"], "%Y-%m-%dT%H:%M:%S.%f")
             data["write_read_latency"] = (now - write_time).total_seconds()
+            data["producer_type"] = "ecs"  # hard coded
             relevant_records.append(
                 {
                     "Data": json.dumps(data).encode("utf-8"),

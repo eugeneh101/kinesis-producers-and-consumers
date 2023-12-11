@@ -72,18 +72,22 @@ def get_and_reduce_and_put_kinesis_records(
 
     summed_value = 0
     summed_write_read_latency = 0
+    count = 0
     for record in records:
         data = json.loads(record["Data"].decode("utf-8"))
         stream = data["stream"]
         assert stream == source_stream, f'Expected "{source_stream} but got "{stream}"'
-        summed_value += data["value"]
-        summed_write_read_latency += data["write_read_latency"]
-    if records:
+        if data["producer_type"] == "ecs":  # hard coded
+            summed_value += data["value"]
+            summed_write_read_latency += data["write_read_latency"]
+            count += 1
+    if count:
         reduced_record = {
             "stream": source_stream,
             "summed_value": summed_value,
-            "count": len(records),
-            "average_write_read_latency": summed_write_read_latency / len(records),
+            "count": count,
+            "average_write_read_latency": summed_write_read_latency / count,
+            "producer_type": "ecs"  # hard coded
         }
         response = kinesis_client.put_records(
             StreamName=target_stream,
@@ -109,7 +113,7 @@ def get_and_reduce_and_put_kinesis_records(
         )
         if enable_print:
             print(
-                f'Reduced {len(records)} records from "{source_stream}", '
+                f'Reduced {count} records from "{source_stream}", '
                 f'put {len(response["Records"])} record(s) in "{target_stream}", '
                 "and checkpointed"
             )
