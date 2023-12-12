@@ -13,9 +13,7 @@ class LambdaDeployer:
         """
 
     def kill_lambda(self, name: str):
-        """
-            Takes a lambda name, and kills it
-        """
+        """Takes a lambda name, and kills it"""
 
     def pause_lambda(self, name: str):
         """
