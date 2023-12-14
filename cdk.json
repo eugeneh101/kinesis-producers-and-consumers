@@ -8,6 +8,7 @@
             "SOURCE_STREAM": "source-stream",
             "VERTEX_STREAMS": ["vertex-stream-a", "vertex-stream-b", "vertex-stream-c"],
             "SINK_STREAM": "sink-stream",
+            "KINESIS_RETENTION_DAYS": 1,
 
             "MAX_BATCH_SIZE": 1000,
             "ENABLE_PRINT": true,
@@ -21,6 +22,7 @@
             "ECS_ACTIVATE_SERVICES": true,
             "ECS_ENABLE_EXEC": true,
             "STREAM_CHECKPOINTER": "stream-checkpointer",
+            "FREQUENCY_PER_MINUTE": 60,
 
             "CONNECT_LAMBDAS_TO_KINESIS": true,
             "LAMBDA_NAME_TEMPLATE": "publisher-to-{}-lambda"
